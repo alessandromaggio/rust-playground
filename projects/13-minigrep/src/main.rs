@@ -10,15 +10,25 @@ struct Config {
 }
 
 impl Config {
-    fn build(args: &[String]) -> Result<Config, &'static str> {
-        if args.len() != 3 {
-            return Err("You must provide exactly two arguments: <query> <filename>");
-        }
+    fn build(mut args: impl Iterator<Item = String>) -> Result<Config, &'static str> {
+        args.next();
+
+        let query = match args.next() {
+            Some(arg) => arg,
+            None => return Err("Didn't get a query string"),
+        };
+
+        let filename = match args.next() {
+            Some(arg) => arg,
+            None => return Err("Didn't get a file name"),
+        };
+
+        let ignore_case = env::var("IGNORE_CASE").is_ok();
 
         let config = Config {
-            query: args[1].clone(),
-            filename: args[2].clone(),
-            ignore_case: env::var("IGNORE_CASE").is_ok(),
+            query,
+            filename,
+            ignore_case,
         };
 
         Ok(config)
@@ -42,8 +52,7 @@ fn run(config: Config) -> Result<(), Box<dyn Error>> {
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let config = Config::build(&args).unwrap_or_else(|err| {
+    let config = Config::build(env::args()).unwrap_or_else(|err| {
         eprintln!("Problem parsing arguments: {}", err);
         std::process::exit(1);
     });
