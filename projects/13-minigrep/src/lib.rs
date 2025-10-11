@@ -1,3 +1,18 @@
+//! A library for the minigrep project.
+//! It provides functions to search for a query string in the contents of a file.
+
+/// Search for a query string in the contents of a file, returning all lines that contain the query.
+/// 
+// # Examples
+/// ```
+/// let query = "duct";
+/// let contents = "\
+/// Rust:
+/// safe, fast, productive.
+/// Pick three.";
+///
+/// assert_eq!(vec!["safe, fast, productive."], minigrep::search(query, contents));
+/// ```
 pub fn search<'a>(query: &str, contents: &'a str) -> Vec<&'a str> {
     contents
         .lines()
@@ -5,6 +20,20 @@ pub fn search<'a>(query: &str, contents: &'a str) -> Vec<&'a str> {
         .collect()
 }
 
+/// Search for a query string in the contents of a file, returning all lines that contain the query,
+/// ignoring case.
+/// 
+// # Examples
+/// ```
+/// let query = "rUsT";
+/// let contents = "\
+/// Rust:
+/// safe, fast, productive.
+/// Pick three.
+/// Trust me.";
+///
+/// assert_eq!(vec!["Rust:", "Trust me."], minigrep::search_case_insensitive(query, contents));
+/// ```
 pub fn search_case_insensitive<'a>(query: &str, contents: &'a str) -> Vec<&'a str> {
     contents
         .lines()
