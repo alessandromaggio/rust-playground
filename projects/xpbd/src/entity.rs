@@ -8,6 +8,8 @@ pub struct ParticleBundle {
     pub mass: Mass,
     pub collider: CircleCollider,
     pub vel: Vel,
+    pub pre_solve_vel: PreSolveVel,
+    pub restitution: Restitution,
 }
 
 impl ParticleBundle {

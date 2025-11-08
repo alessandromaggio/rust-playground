@@ -24,7 +24,7 @@ fn startup(
         Name::new("Left"),
         Mesh2d(circle.clone()),
         MeshMaterial2d(white.clone()),
-        ParticleBundle::new_with_pos_vel_mass(Vec2::new(-100., 0.), Vec2::new(60.0, 0.0), 3.),
+        ParticleBundle::new_with_pos_vel_mass(Vec2::new(-250., 0.), Vec2::new(60.0, 0.0), 250.),
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
 
@@ -32,7 +32,7 @@ fn startup(
         Name::new("Right"),
         Mesh2d(circle.clone()),
         MeshMaterial2d(red.clone()),
-        ParticleBundle::new_with_pos_vel_mass(Vec2::new(100.0, 0.0), Vec2::new(-60.0, 0.0), 1.),
+        ParticleBundle::new_with_pos_vel_mass(Vec2::new(250.0, 0.0), Vec2::new(-60.0, 0.0), 100.),
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
 
