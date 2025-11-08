@@ -18,12 +18,21 @@ fn startup(
     let circle = meshes.add(Circle::new(25.0));
 
     let white = materials.add(Color::WHITE);
+    let red = materials.add(Color::srgb(1.0, 0.0, 0.0));
 
     commands.spawn((
-        Name::new("Circle"),
+        Name::new("Left"),
         Mesh2d(circle.clone()),
         MeshMaterial2d(white.clone()),
-        ParticleBundle::new_with_pos_and_vel(Vec2::ZERO, Vec2::new(60.0, 0.0)),
+        ParticleBundle::new_with_pos_vel_mass(Vec2::new(-100., 0.), Vec2::new(60.0, 0.0), 3.),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+    ));
+
+    commands.spawn((
+        Name::new("Right"),
+        Mesh2d(circle.clone()),
+        MeshMaterial2d(red.clone()),
+        ParticleBundle::new_with_pos_vel_mass(Vec2::new(100.0, 0.0), Vec2::new(-60.0, 0.0), 1.),
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
 

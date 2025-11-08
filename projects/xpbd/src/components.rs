@@ -14,3 +14,17 @@ impl Default for Mass {
         Self(1.)
     }
 }
+
+#[derive(Component, Debug)]
+pub struct CircleCollider {
+    pub radius: f32,
+}
+
+impl Default for CircleCollider {
+    fn default() -> Self {
+        Self { radius: 25. }
+    }
+}
+
+#[derive(Component, Debug, Default)]
+pub struct Vel(pub(crate) Vec2);

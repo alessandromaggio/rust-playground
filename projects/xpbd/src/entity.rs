@@ -6,6 +6,8 @@ pub struct ParticleBundle {
     pub pos: Pos,
     pub prev_pos: PrevPos,
     pub mass: Mass,
+    pub collider: CircleCollider,
+    pub vel: Vel,
 }
 
 impl ParticleBundle {
@@ -13,6 +15,17 @@ impl ParticleBundle {
         Self {
             pos: Pos(pos),
             prev_pos: PrevPos(pos - vel * DELTA_TIME),
+            vel: Vel(vel),
+            ..Default::default()
+        }
+    }
+
+    pub fn new_with_pos_vel_mass(pos: Vec2, vel: Vec2, mass: f32) -> Self {
+        Self {
+            pos: Pos(pos),
+            prev_pos: PrevPos(pos - vel * DELTA_TIME),
+            vel: Vel(vel),
+            mass: Mass(mass),
             ..Default::default()
         }
     }

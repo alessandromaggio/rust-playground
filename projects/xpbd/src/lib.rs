@@ -10,20 +10,21 @@ pub use entity::*;
 #[derive(Debug, Default)]
 pub struct XPBDPlugin;
 
+pub const FIXED_TIMESTEP_INTERVAL: f32 = 64.; // FPS
+pub const DELTA_TIME: f32 = 1. / FIXED_TIMESTEP_INTERVAL;
+
 impl Plugin for XPBDPlugin {
     fn build(&self, app: &mut App) {
         app
-            .insert_resource(AccumulatedTime { time: 0. })
-            .insert_resource(Gravity::default())
-            .add_systems(Startup, startup)
-            .add_systems(PreUpdate, accumulate_time)
-            .add_systems(Update, (simulate, sync_transforms).chain());
+            .insert_resource(Time::<Fixed>::from_hz(FIXED_TIMESTEP_INTERVAL.into()))
+            .insert_resource(Gravity(Vec2::ZERO))
+            .add_systems(FixedUpdate, (
+                collect_collision_pairs,
+                integrate,
+                update_vel
+            ).chain())
+            .add_systems(Update, sync_transforms);
     }
-}
-
-#[derive(Resource, Default)]
-pub struct AccumulatedTime {
-    pub time: f32,
 }
 
 #[derive(Resource, Debug)]
@@ -35,67 +36,56 @@ impl Default for Gravity {
     }
 }
 
-pub const DELTA_TIME: f32 = 1. / 60.; // 60 FPS
+fn collect_collision_pairs(mut query: Query<(&mut Pos, &Mass, &CircleCollider)>) {
+    let mut iter = query.iter_combinations_mut();
+    while let Some(
+        [(mut pos_a, mass_a, collider_a), (mut pos_b, mass_b, collider_b)]
+    ) = iter.fetch_next() {
+        let ab = pos_b.0 - pos_a.0;
+        let combined_radius = collider_a.radius + collider_b.radius;
+        let ab_sqr_len = ab.length_squared();
+        if ab_sqr_len < combined_radius * combined_radius {
+            let ab_length = ab_sqr_len.sqrt();
+            let n = ab / ab_length; // Normalization
+            let penetration_depth = combined_radius - ab_length;
 
-fn startup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-) {
-    let circle = meshes.add(Circle::new(25.0));
+            let w_a = 1. / mass_a.0; // Inverse of mass
+            let w_b = 1. / mass_b.0; // Inverse of mass
+            let w_sum = w_a + w_b;
 
-    let white = materials.add(Color::WHITE);
-
-    commands.spawn((
-        Name::new("Circle"),
-        Mesh2d(circle.clone()),
-        MeshMaterial2d(white.clone()),
-        ParticleBundle::new_with_pos_and_vel(Vec2::ZERO, Vec2::new(60.0, 0.0)),
-        Transform::from_xyz(0.0, 0.0, 0.0),
-    ));
-
-    commands.spawn((Name::new("Camera"), Camera2d::default()));
-}
-
-// Simple position integration system using Verlet integration
-fn simulate(
-    mut query: Query<(&mut Pos, &mut PrevPos, &Mass)>,
-    mut accumulator: ResMut<AccumulatedTime>,
-    gravity: Res<Gravity>,
-) {
-    while accumulator.time >= DELTA_TIME {
-        integrate_positions(&mut query, &gravity);
-        accumulator.time -= DELTA_TIME;
+            // How much an object is to be affected by a collision is proportional to its inverse of mass
+            pos_a.0 -= n * penetration_depth * w_a / w_sum;
+            pos_b.0 += n * penetration_depth * w_b / w_sum;
+        }
     }
 }
 
-fn integrate_positions(query: &mut Query<(&mut Pos, &mut PrevPos, &Mass)>, gravity: &Res<Gravity>) {
-    for (mut pos, mut prev_pos, mass) in query.iter_mut() {
-        
+fn integrate(mut query: Query<(&mut Pos, &mut PrevPos, &mut Vel, &Mass)>, gravity: Res<Gravity>) {
+    for (mut pos, mut prev_pos, mut vel, mass) in query.iter_mut() {
+        prev_pos.0 = pos.0;
+
         let gravitation_force = mass.0 * gravity.0;
         let external_forces = gravitation_force;
-
-        // Velocity is computed as the difference between current and previous position over delta time
-        // Plus, we add all external forces scaled by delta time and mass
-        let velocity = (pos.0 - prev_pos.0) / DELTA_TIME + DELTA_TIME * external_forces / mass.0;
-        prev_pos.0 = pos.0;
-        pos.0 = pos.0 + velocity * DELTA_TIME;
+        vel.0 += DELTA_TIME * external_forces / mass.0;
+        pos.0 += DELTA_TIME * vel.0;
     }
 }
+
+fn solve_pos() {}
+
+fn update_vel(mut query: Query<(&mut Pos, &mut PrevPos, &mut Vel)>) {
+    for (pos, prev_pos, mut vel) in query.iter_mut() {
+        vel.0 = (pos.0 - prev_pos.0) / DELTA_TIME;
+    }
+}
+
+fn solve_vel() {}
 
 // This applies the position component to the Bevy Transform component for rendering
 fn sync_transforms(
-    mut query: Query<(&mut Transform, &Pos, &PrevPos)>,
-    accumulator: ResMut<AccumulatedTime>,
+    mut query: Query<(&mut Transform, &Pos)>,
 ) {
-    let alpha = accumulator.time / DELTA_TIME; // Leftover time ratio for interpolation
-    for (mut transform, pos, prev_pos) in query.iter_mut() {
-        // We interpolate to be somewhere inbetween the previous and current position based on alpha
-        let interpolated = prev_pos.0.lerp(pos.0, alpha);
-        transform.translation = interpolated.extend(0.);
+    for (mut transform, pos) in query.iter_mut() {
+        transform.translation = pos.0.extend(0.);
     }
 }
-
- fn accumulate_time(mut accumulator: ResMut<AccumulatedTime>, time: Res<Time>) {
-    accumulator.time += time.delta_secs();
- }
