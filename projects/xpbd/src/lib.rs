@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 
+mod components;
 mod entity;
+
+pub use components::*;
 pub use entity::*;
 
 
@@ -11,6 +14,7 @@ impl Plugin for XPBDPlugin {
     fn build(&self, app: &mut App) {
         app
             .insert_resource(AccumulatedTime { time: 0. })
+            .insert_resource(Gravity::default())
             .add_systems(Startup, startup)
             .add_systems(PreUpdate, accumulate_time)
             .add_systems(Update, (simulate, sync_transforms).chain());
@@ -20,6 +24,15 @@ impl Plugin for XPBDPlugin {
 #[derive(Resource, Default)]
 pub struct AccumulatedTime {
     pub time: f32,
+}
+
+#[derive(Resource, Debug)]
+pub struct Gravity(pub Vec2);
+
+impl Default for Gravity {
+    fn default() -> Self {
+        Self(Vec2::new(0., -9.81))
+    }
 }
 
 pub const DELTA_TIME: f32 = 1. / 60.; // 60 FPS
@@ -46,19 +59,25 @@ fn startup(
 
 // Simple position integration system using Verlet integration
 fn simulate(
-    mut query: Query<(&mut Pos, &mut PrevPos)>,
+    mut query: Query<(&mut Pos, &mut PrevPos, &Mass)>,
     mut accumulator: ResMut<AccumulatedTime>,
+    gravity: Res<Gravity>,
 ) {
     while accumulator.time >= DELTA_TIME {
-        integrate_positions(&mut query);
+        integrate_positions(&mut query, &gravity);
         accumulator.time -= DELTA_TIME;
     }
 }
 
-fn integrate_positions(query: &mut Query<(&mut Pos, &mut PrevPos)>) {
-    for (mut pos, mut prev_pos) in query.iter_mut() {
+fn integrate_positions(query: &mut Query<(&mut Pos, &mut PrevPos, &Mass)>, gravity: &Res<Gravity>) {
+    for (mut pos, mut prev_pos, mass) in query.iter_mut() {
+        
+        let gravitation_force = mass.0 * gravity.0;
+        let external_forces = gravitation_force;
+
         // Velocity is computed as the difference between current and previous position over delta time
-        let velocity = (pos.0 - prev_pos.0) / DELTA_TIME;
+        // Plus, we add all external forces scaled by delta time and mass
+        let velocity = (pos.0 - prev_pos.0) / DELTA_TIME + DELTA_TIME * external_forces / mass.0;
         prev_pos.0 = pos.0;
         pos.0 = pos.0 + velocity * DELTA_TIME;
     }
