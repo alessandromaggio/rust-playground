@@ -40,3 +40,16 @@ impl Default for Restitution {
         Self(0.3)
     }
 }
+
+#[derive(Component, Debug)]
+pub struct BoxCollider {
+    pub size: Vec2,
+}
+
+impl Default for BoxCollider {
+    fn default() -> Self {
+        Self {
+            size: Vec2::new(50., 50.),
+        }
+    }
+}

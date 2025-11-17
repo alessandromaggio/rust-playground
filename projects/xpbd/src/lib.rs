@@ -22,8 +22,10 @@ impl Plugin for XPBDPlugin {
             .add_systems(FixedUpdate, (
                 collect_collision_pairs,
                 integrate,
+                clear_contacts,
                 solve_pos,
                 solve_pos_statics,
+                solve_pos_static_boxes,
                 update_vel,
                 solve_vel,
                 solve_vel_statics,
@@ -74,7 +76,6 @@ fn solve_pos(
     mut query: Query<(Entity, &mut Pos, &Mass, &CircleCollider)>,
     mut contacts: ResMut<Contacts>
 ) {
-    contacts.0.clear();
     let mut iter = query.iter_combinations_mut();
     while let Some(
         [(entity_a, mut pos_a, mass_a, collider_a), (entity_b, mut pos_b, mass_b, collider_b)]
@@ -105,7 +106,6 @@ fn solve_pos_statics(
     statics: Query<(Entity, &Pos, &CircleCollider), Without<Mass>>,
     mut contacts: ResMut<StaticContacts>
 ) {
-    contacts.0.clear();
     for (entity_a, mut pos_a, collider_a) in dynamics.iter_mut() {
         for (entity_b, pos_b, collider_b) in statics.iter() {
             let ab = pos_b.0 - pos_a.0;
@@ -118,6 +118,49 @@ fn solve_pos_statics(
                 pos_a.0 -= n * penetration_depth;
                 contacts.0.push((entity_a, entity_b, n));
             }
+        }
+    }
+}
+
+fn solve_pos_static_boxes(
+    mut dynamics: Query<(Entity, &mut Pos, &CircleCollider), With<Mass>>,
+    statics: Query<(Entity, &Pos, &BoxCollider), Without<Mass>>,
+    mut contacts: ResMut<StaticContacts>
+) {
+    for (entity_a, mut pos_a, circle_a) in dynamics.iter_mut() {
+        for (entity_b, pos_b, box_b) in statics.iter() {
+            let box_to_circle = pos_a.0 - pos_b.0;
+            let box_to_circle_abs = box_to_circle.abs();
+            let half_extents = box_b.size / 2.;
+            let corner_to_center = box_to_circle_abs - half_extents;
+            let r = circle_a.radius;
+            if corner_to_center.x > r || corner_to_center.y > r {
+                continue;
+            }
+
+            let s = box_to_circle.signum();
+
+            let (n, penetration_depth) = if corner_to_center.x > 0. && corner_to_center.y > 0. {
+                // Corner
+                let corner_to_center_sqr = corner_to_center.length_squared();
+                if corner_to_center_sqr > r * r {
+                    continue;
+                }
+
+                let corner_dist = corner_to_center_sqr.sqrt();
+                let penetration_depth = r - corner_dist;
+                let n = box_to_circle / corner_dist * -s;
+                (n, penetration_depth)
+            } else if corner_to_center.x > corner_to_center.y {
+                // Vertical edge
+                (Vec2::X * -s.x, -corner_to_center.x + r)
+            } else {
+                // Horizontal edge
+                (Vec2::Y * -s.y, -corner_to_center.y + r)
+            };
+
+            pos_a.0 -= n * penetration_depth;
+            contacts.0.push((entity_a, entity_b, n));
         }
     }
 }
@@ -183,4 +226,12 @@ fn sync_transforms(
     for (mut transform, pos) in query.iter_mut() {
         transform.translation = pos.0.extend(0.);
     }
+}
+
+fn clear_contacts(
+    mut contacts: ResMut<Contacts>,
+    mut static_contacts: ResMut<StaticContacts>
+) {
+    contacts.0.clear();
+    static_contacts.0.clear();
 }
