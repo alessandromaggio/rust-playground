@@ -31,4 +31,22 @@ impl ParticleBundle {
             ..Default::default()
         }
     }
+
+    pub fn new_with_pos_vel_mass_radius(pos: Vec2, vel: Vec2, mass: f32, radius: f32) -> Self {
+        Self {
+            pos: Pos(pos),
+            prev_pos: PrevPos(pos - vel * DELTA_TIME),
+            vel: Vel(vel),
+            mass: Mass(mass),
+            collider: CircleCollider { radius },
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Bundle, Default)]
+pub struct StaticColliderBundle {
+    pub pos: Pos,
+    pub collider: CircleCollider,
+    pub restitution: Restitution,
 }

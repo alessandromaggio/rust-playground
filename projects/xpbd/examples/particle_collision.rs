@@ -4,6 +4,7 @@ use xpbd::*;
 fn main() {
     App::new()
         .insert_resource(ClearColor(Color::BLACK))
+        .insert_resource(Gravity(Vec2::ZERO))
         .add_plugins(DefaultPlugins)
         .add_plugins(XPBDPlugin)
         .add_systems(Startup, startup)

@@ -17,14 +17,16 @@ impl Plugin for XPBDPlugin {
     fn build(&self, app: &mut App) {
         app
             .insert_resource(Time::<Fixed>::from_hz(FIXED_TIMESTEP_INTERVAL.into()))
-            .insert_resource(Gravity(Vec2::ZERO))
             .insert_resource(Contacts::default())
+            .insert_resource(StaticContacts::default())
             .add_systems(FixedUpdate, (
                 collect_collision_pairs,
                 integrate,
                 solve_pos,
+                solve_pos_statics,
                 update_vel,
                 solve_vel,
+                solve_vel_statics,
                 sync_transforms
             ).chain())
             .add_systems(Update, sync_transforms);
@@ -41,7 +43,7 @@ impl Default for Gravity {
 }
 
 #[derive(Resource, Debug)]
-pub struct Contacts(pub Vec<(Entity, Entity)>);
+pub struct Contacts(pub Vec<(Entity, Entity, Vec2)>);
 
 impl Default for Contacts {
     fn default() -> Self {
@@ -52,6 +54,9 @@ impl Default for Contacts {
 fn collect_collision_pairs() {
     
 }
+
+#[derive(Resource, Debug, Default)]
+pub struct StaticContacts(pub Vec<(Entity, Entity, Vec2)>);
 
 fn integrate(mut query: Query<(&mut Pos, &mut PrevPos, &mut Vel, &mut PreSolveVel, &Mass)>, gravity: Res<Gravity>) {
     for (mut pos, mut prev_pos, mut vel, mut pre_solve_vel, mass) in query.iter_mut() {
@@ -78,8 +83,6 @@ fn solve_pos(
         let combined_radius = collider_a.radius + collider_b.radius;
         let ab_sqr_len = ab.length_squared();
         if ab_sqr_len < combined_radius * combined_radius {
-            contacts.0.push((entity_a, entity_b));
-
             let ab_length = ab_sqr_len.sqrt();
             let n = ab / ab_length; // Normalization
             let penetration_depth = combined_radius - ab_length;
@@ -91,6 +94,30 @@ fn solve_pos(
             // How much an object is to be affected by a collision is proportional to its inverse of mass
             pos_a.0 += n * penetration_depth * w_a / w_sum;
             pos_b.0 += n * penetration_depth * w_b / w_sum;
+
+            contacts.0.push((entity_a, entity_b, n));
+        }
+    }
+}
+
+fn solve_pos_statics(
+    mut dynamics: Query<(Entity, &mut Pos, &CircleCollider), With<Mass>>,
+    statics: Query<(Entity, &Pos, &CircleCollider), Without<Mass>>,
+    mut contacts: ResMut<StaticContacts>
+) {
+    contacts.0.clear();
+    for (entity_a, mut pos_a, collider_a) in dynamics.iter_mut() {
+        for (entity_b, pos_b, collider_b) in statics.iter() {
+            let ab = pos_b.0 - pos_a.0;
+            let combined_radius = collider_a.radius + collider_b.radius;
+            let ab_sqr_len = ab.length_squared();
+            if ab_sqr_len < combined_radius * combined_radius {
+                let ab_length = ab_sqr_len.sqrt();
+                let penetration_depth = combined_radius - ab_length;
+                let n = ab / ab_length;
+                pos_a.0 -= n * penetration_depth;
+                contacts.0.push((entity_a, entity_b, n));
+            }
         }
     }
 }
@@ -102,13 +129,13 @@ fn update_vel(mut query: Query<(&mut Pos, &mut PrevPos, &mut Vel)>) {
 }
 
 fn solve_vel(
-    query: Query<(&mut Vel, &PreSolveVel, &Pos, &Mass, &Restitution)>,
+    query: Query<(&mut Vel, &PreSolveVel, &Mass, &Restitution)>,
     contacts: Res<Contacts>
 ) {
-    for (entity_a, entity_b) in contacts.0.iter().cloned() {
+    for (entity_a, entity_b, n) in contacts.0.iter().cloned() {
         let (
-            (mut vel_a, pre_solve_vel_a, pos_a, mass_a, restitution_a),
-            (mut vel_b, pre_solve_vel_b, pos_b, mass_b, restituion_b)
+            (mut vel_a, pre_solve_vel_a, mass_a, restitution_a),
+            (mut vel_b, pre_solve_vel_b, mass_b, restituion_b)
         ) = unsafe {
             assert!(entity_a != entity_b); // Ensure safety
             (
@@ -117,7 +144,6 @@ fn solve_vel(
             )
         };
 
-        let n = (pos_b.0 - pos_a.0).normalize();
         let pre_solve_relative_vel = pre_solve_vel_a.0 - pre_solve_vel_b.0;
         let pre_solve_normal_vel = Vec2::dot(pre_solve_relative_vel, n);
 
@@ -131,6 +157,22 @@ fn solve_vel(
 
         vel_a.0 = n * (-normal_vel - restitution * pre_solve_normal_vel) * w_a / w_sum;
         vel_b.0 = n * (-normal_vel - restitution * pre_solve_normal_vel) * w_b / w_sum;
+    }
+}
+
+fn solve_vel_statics(
+    mut dynamics: Query<(&mut Vel, &PreSolveVel, &Restitution), With<Mass>>,
+    statics: Query<&Restitution, Without<Mass>>,
+    contacts: Res<StaticContacts>
+) {
+    for (entity_a, entity_b, n) in contacts.0.iter().cloned() {
+        let (mut vel_a, pre_solve_vel_a, restitution_a) =
+            dynamics.get_mut(entity_a).expect(&format!("Could not unwrap dynamic entity {:?}", entity_a));
+        let restitution_b = statics.get(entity_b).expect(&format!("Could not unwrap static entity {:?}", entity_b));
+        let pre_solve_normal_vel = Vec2::dot(pre_solve_vel_a.0, n);
+        let normal_vel = Vec2::dot(vel_a.0, n);
+        let restitution = (restitution_a.0 + restitution_b.0) / 2.;
+        vel_a.0 += n * (-normal_vel - restitution * pre_solve_normal_vel);
     }
 }
 
