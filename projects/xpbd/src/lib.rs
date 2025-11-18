@@ -1,64 +1,90 @@
 use bevy::prelude::*;
+use bevy::ecs::schedule::ScheduleLabel;
 
 mod components;
 mod entity;
+mod resources;
 
 pub use components::*;
 pub use entity::*;
+pub use resources::*;
 
 
 #[derive(Debug, Default)]
 pub struct XPBDPlugin;
 
-pub const FIXED_TIMESTEP_INTERVAL: f32 = 64.; // FPS
-pub const DELTA_TIME: f32 = 1. / FIXED_TIMESTEP_INTERVAL;
+pub const FIXED_TIMESTEP_INTERVAL: i32 = 64; // FPS
+pub const DELTA_TIME: f32 = 1. / FIXED_TIMESTEP_INTERVAL as f32;
+
+pub const NUM_SUBSTEPS: i32 = 10;
+pub const SUB_DT: f32 = DELTA_TIME / NUM_SUBSTEPS as f32;
+
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+struct SubstepSchedule;
+
+fn run_subteps(world: &mut World) {
+    for _ in 0..NUM_SUBSTEPS {
+        world.run_schedule(SubstepSchedule);
+    }
+}
+
 
 impl Plugin for XPBDPlugin {
     fn build(&self, app: &mut App) {
         app
             .insert_resource(Time::<Fixed>::from_hz(FIXED_TIMESTEP_INTERVAL.into()))
+            .insert_resource(CollisionPairs::default())
             .insert_resource(Contacts::default())
             .insert_resource(StaticContacts::default())
+            .add_schedule(Schedule::new(SubstepSchedule))
+            .add_systems(SubstepSchedule, (
+                solve_pos,
+                solve_pos_statics,
+                solve_pos_static_boxes
+            ))
             .add_systems(FixedUpdate, (
                 collect_collision_pairs,
                 integrate,
                 clear_contacts,
-                solve_pos,
-                solve_pos_statics,
-                solve_pos_static_boxes,
+                run_subteps,
                 update_vel,
                 solve_vel,
                 solve_vel_statics,
                 sync_transforms
-            ).chain())
-            .add_systems(Update, sync_transforms);
+            ).chain());
     }
 }
 
-#[derive(Resource, Debug)]
-pub struct Gravity(pub Vec2);
+fn collect_collision_pairs(
+    query: Query<(Entity, &Pos, &Vel, &CircleCollider)>,
+    mut collision_pairs: ResMut<CollisionPairs>,
+) {
+    collision_pairs.0.clear();
 
-impl Default for Gravity {
-    fn default() -> Self {
-        Self(Vec2::new(0., -9.81))
+    let k = 2.; // safety margin multiplier, bigger than 1 to account for sudden acceleration
+    let safety_margin_factor = k * DELTA_TIME;
+    let safety_margin_factor_sqr = safety_margin_factor * safety_margin_factor;
+
+    {
+        for (entity_a, pos_a, vel_a, collider_a) in query.iter() {
+            let vel_a_sqr = vel_a.0.length_squared();
+            for (entity_b, pos_b, vel_b, collider_b) in query.iter() {
+                if entity_a == entity_b {
+                    continue;
+                }
+                let ab = pos_b.0 - pos_a.0;
+                let vel_b_sqr = vel_b.0.length_squared();
+                let safety_margin_sqr = safety_margin_factor_sqr * (vel_a_sqr + vel_b_sqr);
+
+                let combined_radius = collider_a.radius + collider_b.radius + safety_margin_sqr.sqrt();
+
+                if ab.length_squared() < combined_radius * combined_radius {
+                    collision_pairs.0.push((entity_a, entity_b));
+                }
+            }
+        }
     }
 }
-
-#[derive(Resource, Debug)]
-pub struct Contacts(pub Vec<(Entity, Entity, Vec2)>);
-
-impl Default for Contacts {
-    fn default() -> Self {
-        Self(Vec::new())
-    }
-}
-
-fn collect_collision_pairs() {
-    
-}
-
-#[derive(Resource, Debug, Default)]
-pub struct StaticContacts(pub Vec<(Entity, Entity, Vec2)>);
 
 fn integrate(mut query: Query<(&mut Pos, &mut PrevPos, &mut Vel, &mut PreSolveVel, &Mass)>, gravity: Res<Gravity>) {
     for (mut pos, mut prev_pos, mut vel, mut pre_solve_vel, mass) in query.iter_mut() {
@@ -73,30 +99,34 @@ fn integrate(mut query: Query<(&mut Pos, &mut PrevPos, &mut Vel, &mut PreSolveVe
 }
 
 fn solve_pos(
-    mut query: Query<(Entity, &mut Pos, &Mass, &CircleCollider)>,
-    mut contacts: ResMut<Contacts>
+    query: Query<(&mut Pos, &CircleCollider, &Mass)>,
+    collision_pairs: ResMut<CollisionPairs>
 ) {
-    let mut iter = query.iter_combinations_mut();
-    while let Some(
-        [(entity_a, mut pos_a, mass_a, collider_a), (entity_b, mut pos_b, mass_b, collider_b)]
-    ) = iter.fetch_next() {
+    for (entity_a, entity_b) in collision_pairs.0.iter() {
+        let (
+            (mut pos_a, circle_a, mass_a),
+            (mut pos_b, circle_b, mass_b)
+        ) = unsafe {
+            assert!(entity_a != entity_b);
+            (
+                query.get_unchecked(*entity_a).unwrap_unchecked(),
+                query.get_unchecked(*entity_b).unwrap_unchecked(),
+            )
+        };
         let ab = pos_b.0 - pos_a.0;
-        let combined_radius = collider_a.radius + collider_b.radius;
+        let combined_radius = circle_a.radius + circle_b.radius;
         let ab_sqr_len = ab.length_squared();
         if ab_sqr_len < combined_radius * combined_radius {
             let ab_length = ab_sqr_len.sqrt();
-            let n = ab / ab_length; // Normalization
             let penetration_depth = combined_radius - ab_length;
+            let n = ab / ab_length;
 
-            let w_a = 1. / mass_a.0; // Inverse of mass
-            let w_b = 1. / mass_b.0; // Inverse of mass
+            let w_a = 1. / mass_a.0;
+            let w_b = 1. / mass_b.0;
             let w_sum = w_a + w_b;
 
-            // How much an object is to be affected by a collision is proportional to its inverse of mass
-            pos_a.0 += n * penetration_depth * w_a / w_sum;
+            pos_a.0 -= n * penetration_depth * w_a / w_sum;
             pos_b.0 += n * penetration_depth * w_b / w_sum;
-
-            contacts.0.push((entity_a, entity_b, n));
         }
     }
 }
